@@ -3,7 +3,11 @@ import statesman
 import asyncio
 import argparse
 import logging
-from bleak import BleakClient, BleakScanner, BLEDevice
+import struct
+from bleak import BleakClient, BleakError, BleakScanner, BLEDevice, BleakGATTCharacteristic
+
+PRESSURE_UUID:str='00002a6d-0000-1000-8000-00805f9b34fb'
+TEMPERATURE_UUID:str='00002a6e-0000-1000-8000-00805f9b34fb'
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +53,57 @@ class StateMachine(statesman.StateMachine):
         if device is None:
             await self.stop()
         else:
-            await self.execute()
+            await self.execute(device)
     
+    def disconnected(self, client):
+        print('disconnected')
+
+    async def notify(self, sender: BleakGATTCharacteristic, data: bytearray):
+        value:int = int.from_bytes(data, 'little')
+        if sender.uuid == PRESSURE_UUID:
+            print('Pressure:', value/10)
+        elif sender.uuid == TEMPERATURE_UUID:
+            print('Temperature:', value/100)
+
     @statesman.event(source=States.connecting, target=States.executing)
-    async def execute(self):
-        async with BleakClient(self.device) as client:
+    async def execute(self, device: BLEDevice):
+        client = BleakClient(address_or_ble_device=device, disconnected_callback=self.disconnected)
+        try:
+            await client.connect()
+            if client.is_connected:
+                logger.info('Connected!')
+                while 1:
+                    for service in client.services:
+                        for char in service.characteristics:
+                            '''if 'read' in char.properties:
+                                try:
+                                    value = await client.read_gatt_char(char.uuid)
+                                    print('Array of length', len(value), value)
+                                    logger.info('  [Characteristic] %s (%s), value: %r', char, ','.join(char.properties), value)
+
+                                    #print(value.decode(encoding='ascii'))
+                                    #logger.info('Characteristic: %s Value: %s', char, value)
+                                    #print(int.from_bytes(value, 'little'))
+                                    #print(struct.unpack('f', value))
+                                except Exception as ex:
+                                    logger.error('Characteristic read error: %s', ex)'''
+                            if 'notify' in char.properties:
+                                #https://stackoverflow.com/questions/65120622/use-python-and-bleak-library-to-notify-a-bluetooth-gatt-device-but-the-result-i
+                                #logger.info('  [Characteristic] %s (%s)', char, ','.join(char.properties))
+                                await client.start_notify(char.uuid, self.notify)
+                                await asyncio.sleep(1)
+                                await client.stop_notify(char.uuid)
+
+                            '''for descriptor in char.descriptors:
+                                value = await client.read_gatt_descriptor(descriptor.handle)
+                                logger.info('     [Descriptor] %s, Value: %r', descriptor, value)
+                                print(value)
+                                #print(struct.unpack('b', value))'''
+
+        except BleakError as ex:
+            logger.error(ex)
+        
+        """ async with BleakClient(address_or_ble_device=device, disconnected_callback=self.disconnected) as client:
             logger.info('Connected!')
 
             for service in client.services:
@@ -74,7 +124,7 @@ class StateMachine(statesman.StateMachine):
                             logger.info('     [Descriptor] %s, Value: %r', descriptor, value)
                         except Exception as ex:
                             logger.error('     [Descriptor] %s, Error: %s', descriptor, ex)
-        await self.stop()
+        await self.stop() """
 
     @statesman.before_event('execute')
     async def _print_status(self) -> None:
