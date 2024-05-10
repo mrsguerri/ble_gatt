@@ -6,10 +6,51 @@ import logging
 import struct
 from bleak import BleakClient, BleakError, BleakScanner, BLEDevice, BleakGATTCharacteristic
 
+from PyQt6.QtWidgets import QApplication, QGridLayout, QWidget, QLabel, QPushButton, QLineEdit, QTextBrowser
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
+import sys
+
 PRESSURE_UUID:str='00002a6d-0000-1000-8000-00805f9b34fb'
 TEMPERATURE_UUID:str='00002a6e-0000-1000-8000-00805f9b34fb'
 
 logger = logging.getLogger(__name__)
+
+class Window(QWidget):
+
+    txtStreamer: QTextBrowser = None
+
+    def __init__(self):
+        super().__init__()
+        self.__present()
+
+    def __test(self):
+        self.txtStreamer.setText('wow')
+
+    def __present(self):
+        lblConnect = QLabel(text="Device name or address:")
+        btnConnect = QPushButton('Connect')
+        btnConnect.setEnabled(False)
+
+        input = QLineEdit(self)
+
+        txtStreamer = QTextBrowser(self)
+        txtStreamer.setText("")
+        
+        grid = QGridLayout()
+        grid.setSpacing(3)
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(3)
+
+        grid.addWidget(lblConnect, 0, 0)
+        grid.addWidget(input, 1, 0)
+        grid.addWidget(btnConnect, 1, 1)
+        grid.addWidget(txtStreamer, 2, 0, 6, 2)
+ 
+        self.setLayout(grid)
+        self.setGeometry(300, 300, 350, 400)
+        self.setWindowTitle('Streamer')
+        self.show()
 
 class StateMachine(statesman.StateMachine):
     class States(statesman.StateEnum):
@@ -143,9 +184,14 @@ async def _examples():
     parser.add_argument('--services', metavar='<uuid>', nargs='+')
     args = parser.parse_args()
 
+    app = QApplication(sys.argv)
+    window = Window()
+    sys.exit(app.exec())
+
     logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(name)-8s %(levelname)s: %(message)s')
 
     stateMachine = StateMachine()
     await stateMachine.start(args)
+
 
 asyncio.run(_examples())
