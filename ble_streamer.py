@@ -19,6 +19,7 @@ class BleConnector:
     names: list = []
     devices: list = []
     streamer: QTextBrowser = None
+    prefix: str = None
 
     def add(self, name: str) -> None:
         self.names.append(name)
@@ -48,10 +49,10 @@ class BleConnector:
         value:int = int.from_bytes(data, 'little')
         if sender.uuid == PRESSURE_UUID:
             print('Pressure:', value/10)
-            self.streamer.append('Pressure: ' + str(value/10))
+            self.streamer.append(self.prefix + ' Pressure: ' + str(value/10))
         elif sender.uuid == TEMPERATURE_UUID:
             print('Temperature:', value/100)
-            self.streamer.append('Temperature: ' + str(value/100))
+            self.streamer.append(self.prefix + ' Temperature: ' + str(value/100))
 
     async def execute(self):
         clients = []
@@ -67,6 +68,7 @@ class BleConnector:
         while 1:
             for c in clients:
                 if c.is_connected:
+                      self.prefix = str(c.address)
                       for service in client.services:
                         for char in service.characteristics:
                             if 'notify' in char.properties:
