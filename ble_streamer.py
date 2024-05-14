@@ -3,54 +3,18 @@ import statesman
 import asyncio
 import argparse
 import logging
-import struct
 from bleak import BleakClient, BleakError, BleakScanner, BLEDevice, BleakGATTCharacteristic
 
 from PyQt6.QtWidgets import QApplication, QGridLayout, QWidget, QLabel, QPushButton, QLineEdit, QTextBrowser
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt
 import sys
+from qasync import QEventLoop, asyncSlot
 
 PRESSURE_UUID:str='00002a6d-0000-1000-8000-00805f9b34fb'
 TEMPERATURE_UUID:str='00002a6e-0000-1000-8000-00805f9b34fb'
 
 logger = logging.getLogger(__name__)
-
-class Window(QWidget):
-
-    txtStreamer: QTextBrowser = None
-
-    def __init__(self):
-        super().__init__()
-        self.__present()
-
-    def __test(self):
-        self.txtStreamer.setText('wow')
-
-    def __present(self):
-        lblConnect = QLabel(text="Device name or address:")
-        btnConnect = QPushButton('Connect')
-        btnConnect.setEnabled(False)
-
-        input = QLineEdit(self)
-
-        txtStreamer = QTextBrowser(self)
-        txtStreamer.setText("")
-        
-        grid = QGridLayout()
-        grid.setSpacing(3)
-        grid.setHorizontalSpacing(4)
-        grid.setVerticalSpacing(3)
-
-        grid.addWidget(lblConnect, 0, 0)
-        grid.addWidget(input, 1, 0)
-        grid.addWidget(btnConnect, 1, 1)
-        grid.addWidget(txtStreamer, 2, 0, 6, 2)
- 
-        self.setLayout(grid)
-        self.setGeometry(300, 300, 350, 400)
-        self.setWindowTitle('Streamer')
-        self.show()
 
 class StateMachine(statesman.StateMachine):
     class States(statesman.StateEnum):
@@ -175,23 +139,87 @@ class StateMachine(statesman.StateMachine):
     async def stop(self):
         print('stop')
 
-async def _examples():
-    # Let's play.
-    parser = argparse.ArgumentParser()
-    device_group = parser.add_mutually_exclusive_group(required=True)
-    device_group.add_argument('--name', metavar='<name>', type=str, help='The name of the bluetooth device to connect to.')
-    device_group.add_argument('--address', metavar='<address>', type=str, help='The address of the bluetooth device to connect to.')
-    parser.add_argument('--services', metavar='<uuid>', nargs='+')
-    args = parser.parse_args()
+class Window(QWidget):
 
-    app = QApplication(sys.argv)
-    window = Window()
-    sys.exit(app.exec())
+    txtStreamer: QTextBrowser = None
+    stateMachine: StateMachine = None
+    input: QLineEdit = None
+    btnConnect: QPushButton = None
+    loop: asyncio.AbstractEventLoop = None
+
+    def __init__(self):
+        super().__init__()
+        self.__present()
+        self.stateMachine = StateMachine()
+        self.loop = asyncio.get_event_loop()
+    
+    def __textChanged(self):
+        if len(self.input.text()) == 0:
+            self.btnConnect.setEnabled(False)
+        else:
+            self.btnConnect.setEnabled(True)
+
+    @asyncSlot()
+    async def test(self):
+        self.txtStreamer.setText('wow')
+
+    #https://stackoverflow.com/questions/67152552/how-do-i-add-asyncio-task-to-pyqt5-event-loop-so-that-it-runs-and-avoids-the-nev
+    async def __click(self):
+        await self.test()
+        #loop = asyncio.new_event_loop()
+        #loop.call_soon_threadsafe(self.stateMachine.start(self.input.text()))
+        #asyncio.run_coroutine_threadsafe(self.stateMachine.start(self.input.text()), loop)
+        #asyncio.run(self.stateMachine.start(self.input.text()))
+
+    def __present(self):
+        lblConnect = QLabel(text="Device name or address:")
+        self.btnConnect = QPushButton('Connect')
+        self.btnConnect.setEnabled(False)
+        self.btnConnect.clicked.connect(self.__click)
+
+        self.input = QLineEdit(self)
+        self.input.textChanged[str].connect(self.__textChanged)
+
+        self.txtStreamer = QTextBrowser(self)
+        self.txtStreamer.setText("")
+        
+        grid = QGridLayout()
+        grid.setSpacing(3)
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(3)
+
+        grid.addWidget(lblConnect, 0, 0)
+        grid.addWidget(self.input, 1, 0)
+        grid.addWidget(self.btnConnect, 1, 1)
+        grid.addWidget(self.txtStreamer, 2, 0, 6, 2)
+ 
+        self.setLayout(grid)
+        self.setGeometry(300, 300, 350, 400)
+        self.setWindowTitle('Streamer')
+        self.show()
+
+def main():
+    #parser = argparse.ArgumentParser()
+    #device_group = parser.add_mutually_exclusive_group(required=True)
+    #device_group.add_argument('--name', metavar='<name>', type=str, help='The name of the bluetooth device to connect to.')
+    #device_group.add_argument('--address', metavar='<address>', type=str, help='The address of the bluetooth device to connect to.')
+    #parser.add_argument('--services', metavar='<uuid>', nargs='+')
+    #args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(name)-8s %(levelname)s: %(message)s')
 
-    stateMachine = StateMachine()
-    await stateMachine.start(args)
+    app = QApplication(sys.argv)
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
 
+    window = Window()
+    #sys.exit(app.exec())
+    with loop:
+        loop.run_forever()
 
-asyncio.run(_examples())
+"""     stateMachine = StateMachine()
+    await stateMachine.start(args) """
+
+if __name__ == "__main__":
+    main()
+    #asyncio.run(main())
