@@ -5,11 +5,12 @@ import argparse
 import logging
 from bleak import BleakClient, BleakError, BleakScanner, BLEDevice, BleakGATTCharacteristic
 
-from PyQt6.QtWidgets import QApplication, QGridLayout, QWidget, QLabel, QPushButton, QLineEdit, QTextBrowser
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QGridLayout, QWidget, QLabel, QPushButton, QLineEdit, QTextBrowser
+import PySide6.QtAsyncio as QtAsyncio
+from PySide6.QtCore import QTimer
 import sys
-from qasync import QEventLoop, asyncSlot
+from queue import Queue
+from threading import Thread
 
 PRESSURE_UUID:str='00002a6d-0000-1000-8000-00805f9b34fb'
 TEMPERATURE_UUID:str='00002a6e-0000-1000-8000-00805f9b34fb'
@@ -40,11 +41,12 @@ class StateMachine(statesman.StateMachine):
         return device
 
     @statesman.event(None, States.starting)
-    async def start(self, args: argparse.Namespace):
-        if args.name is not None:
-            self.name = args.name
-        else:
-            self.addr = args.address
+    async def start(self, name: str):
+        #if args.name is not None:
+        #    self.name = args.name
+        #else:
+        #    self.addr = args.address
+        self.name = name
         
         print('start')
         await self.connect()
@@ -80,18 +82,6 @@ class StateMachine(statesman.StateMachine):
                 while 1:
                     for service in client.services:
                         for char in service.characteristics:
-                            '''if 'read' in char.properties:
-                                try:
-                                    value = await client.read_gatt_char(char.uuid)
-                                    print('Array of length', len(value), value)
-                                    logger.info('  [Characteristic] %s (%s), value: %r', char, ','.join(char.properties), value)
-
-                                    #print(value.decode(encoding='ascii'))
-                                    #logger.info('Characteristic: %s Value: %s', char, value)
-                                    #print(int.from_bytes(value, 'little'))
-                                    #print(struct.unpack('f', value))
-                                except Exception as ex:
-                                    logger.error('Characteristic read error: %s', ex)'''
                             if 'notify' in char.properties:
                                 #https://stackoverflow.com/questions/65120622/use-python-and-bleak-library-to-notify-a-bluetooth-gatt-device-but-the-result-i
                                 #logger.info('  [Characteristic] %s (%s)', char, ','.join(char.properties))
@@ -99,40 +89,11 @@ class StateMachine(statesman.StateMachine):
                                 await asyncio.sleep(1)
                                 await client.stop_notify(char.uuid)
 
-                            '''for descriptor in char.descriptors:
-                                value = await client.read_gatt_descriptor(descriptor.handle)
-                                logger.info('     [Descriptor] %s, Value: %r', descriptor, value)
-                                print(value)
-                                #print(struct.unpack('b', value))'''
-
         except BleakError as ex:
             logger.error(ex)
-        
-        """ async with BleakClient(address_or_ble_device=device, disconnected_callback=self.disconnected) as client:
-            logger.info('Connected!')
-
-            for service in client.services:
-                logger.info('[Service] %s', service)
-                for char in service.characteristics:
-                    if 'read' in char.properties:
-                        try:
-                            value = await client.read_gatt_char(char.uuid)
-                            logger.info('  [Characteristic] %s (%s), value: %r', char, ','.join(char.properties), value)
-                        except Exception as ex:
-                            logger.error('  [Characteristic] %s (%s), Error: %s', char, ','.join(char.properties), ex)
-                    else:
-                        logger.info('  [Characteristic] %s (%s)', char, ','.join(char.properties))
-
-                    for descriptor in char.descriptors:
-                        try:
-                            value = await client.read_gatt_descriptor(descriptor.handle)
-                            logger.info('     [Descriptor] %s, Value: %r', descriptor, value)
-                        except Exception as ex:
-                            logger.error('     [Descriptor] %s, Error: %s', descriptor, ex)
-        await self.stop() """
 
     @statesman.before_event('execute')
-    async def _print_status(self) -> None:
+    async def __print_status(self) -> None:
         print('Connected to device!')
 
     @statesman.event(source=States.__any__, target=States.stopping)
@@ -142,16 +103,25 @@ class StateMachine(statesman.StateMachine):
 class Window(QWidget):
 
     txtStreamer: QTextBrowser = None
-    stateMachine: StateMachine = None
     input: QLineEdit = None
     btnConnect: QPushButton = None
-    loop: asyncio.AbstractEventLoop = None
+    subscriptions: Queue = None
+    publications: Queue = None
+    timer: QTimer = None
 
-    def __init__(self):
+    def __checkQueue(self):
+        if not self.publications.empty():
+            value = self.publications.get(block = True)
+            self.txtStreamer.append(value)
+
+    def __init__(self, subscriptions: Queue, publications: Queue):
         super().__init__()
+        self.subscriptions = subscriptions
+        self.publications = publications
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.__checkQueue)
+        self.timer.start(1000)
         self.__present()
-        self.stateMachine = StateMachine()
-        self.loop = asyncio.get_event_loop()
     
     def __textChanged(self):
         if len(self.input.text()) == 0:
@@ -159,17 +129,13 @@ class Window(QWidget):
         else:
             self.btnConnect.setEnabled(True)
 
-    @asyncSlot()
-    async def test(self):
-        self.txtStreamer.setText('wow')
-
     #https://stackoverflow.com/questions/67152552/how-do-i-add-asyncio-task-to-pyqt5-event-loop-so-that-it-runs-and-avoids-the-nev
-    async def __click(self):
-        await self.test()
-        #loop = asyncio.new_event_loop()
-        #loop.call_soon_threadsafe(self.stateMachine.start(self.input.text()))
-        #asyncio.run_coroutine_threadsafe(self.stateMachine.start(self.input.text()), loop)
-        #asyncio.run(self.stateMachine.start(self.input.text()))
+    def __click(self):
+        self.subscriptions.put(self.input.text())
+        print(self.subscriptions.qsize())
+
+    def closeEvent(self, event):
+        self.subscriptions.put('quit')
 
     def __present(self):
         lblConnect = QLabel(text="Device name or address:")
@@ -196,30 +162,46 @@ class Window(QWidget):
         self.setLayout(grid)
         self.setGeometry(300, 300, 350, 400)
         self.setWindowTitle('Streamer')
+
+        #Display after setting up the display elements
         self.show()
 
-def main():
-    #parser = argparse.ArgumentParser()
-    #device_group = parser.add_mutually_exclusive_group(required=True)
-    #device_group.add_argument('--name', metavar='<name>', type=str, help='The name of the bluetooth device to connect to.')
-    #device_group.add_argument('--address', metavar='<address>', type=str, help='The address of the bluetooth device to connect to.')
-    #parser.add_argument('--services', metavar='<uuid>', nargs='+')
-    #args = parser.parse_args()
+async def test(sub: Queue, pub: Queue):
+    stop = False
+    while not stop:
+        if not sub.empty():
+            value = sub.get(block=True)
+            print(value)
+            if value == 'quit':
+                stop = True
+            else:
+                stateMachine = StateMachine()
+                await stateMachine.start(value)
 
+def bleMachine(subscriptions: Queue, publications: Queue):
+    asyncio.run(test(subscriptions, publications))
+
+def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(name)-8s %(levelname)s: %(message)s')
 
-    app = QApplication(sys.argv)
-    loop = QEventLoop(app)
-    asyncio.set_event_loop(loop)
+    #Cross-thread communication
+    subscriptions = Queue()
+    publications = Queue()
 
-    window = Window()
-    #sys.exit(app.exec())
-    with loop:
-        loop.run_forever()
+    #Connections
+    thread = Thread(target=bleMachine, args=(subscriptions, publications))
+    thread.start()
+
+    #GUI
+    app = QApplication(sys.argv)
+    window = Window(subscriptions, publications)
+    QtAsyncio.run()
+
+
+
 
 """     stateMachine = StateMachine()
     await stateMachine.start(args) """
 
 if __name__ == "__main__":
     main()
-    #asyncio.run(main())
