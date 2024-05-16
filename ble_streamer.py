@@ -9,8 +9,10 @@ from PySide6.QtCore import QTimer
 import sys
 import json
 
+#https://gist.github.com/sam016/4abe921b5a9ee27f67b3686910293026
 PRESSURE_UUID:str='00002a6d-0000-1000-8000-00805f9b34fb'
 TEMPERATURE_UUID:str='00002a6e-0000-1000-8000-00805f9b34fb'
+LED_UUID: str='00001525-1212-efde-1523-785feabcd123'
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ class BleConnector:
     devices: list = []
     streamer: QTextBrowser = None
     prefix: str = None
+    ledOn: bool = False
+    lastState: bool = False
 
     def add(self, name: str) -> None:
         self.names.append(name)
@@ -54,6 +58,18 @@ class BleConnector:
             print('Temperature:', value/100)
             self.streamer.append(self.prefix + ' Temperature: ' + str(value/100))
 
+    async def write_gatt(self, char: BleakGATTCharacteristic, client: BleakClient):
+        try:
+            if self.ledOn is not self.lastState:
+                if self.ledOn:
+                    await client.write_gatt_char(char, b'\x01')
+                else:
+                    await client.write_gatt_char(char, b'\x00')
+                self.lastState = self.ledOn
+                await asyncio.sleep(0.1)
+        except BleakError as ex:
+            print(ex)
+
     async def execute(self):
         clients = []
         for d in self.devices:
@@ -76,7 +92,9 @@ class BleConnector:
                                 #logger.info('  [Characteristic] %s (%s)', char, ','.join(char.properties))
                                 await c.start_notify(char.uuid, self.notify)
                                 await asyncio.sleep(1)
-                                await c.stop_notify(char.uuid)                  
+                                await c.stop_notify(char.uuid) 
+                            elif 'write' in char.properties:
+                                await self.write_gatt(char, c)          
 
     async def stop(self):
         print('stop')
@@ -86,6 +104,7 @@ class Window(QWidget):
     txtStreamer: QTextBrowser = None
     input: QLineEdit = None
     btnConnect: QPushButton = None
+    btnAlter: QPushButton = None
     timer: QTimer = None
     connector: BleConnector = None
 
@@ -117,11 +136,17 @@ class Window(QWidget):
     def closeEvent(self, event):
         print('exit')
 
+    def __alter(self):
+        self.connector.ledOn = not self.connector.ledOn
+
     def __present(self):
         lblConnect = QLabel(text="Json file:")
         self.btnConnect = QPushButton('Connect')
         self.btnConnect.setEnabled(False)
         self.btnConnect.clicked.connect(lambda: asyncio.ensure_future(self.__click()))
+
+        self.btnAlter = QPushButton('Toggle LED')
+        self.btnAlter.clicked.connect(self.__alter)
 
         self.input = QLineEdit(self)
         self.input.textChanged[str].connect(self.__textChanged)
@@ -137,6 +162,7 @@ class Window(QWidget):
         grid.addWidget(lblConnect, 0, 0)
         grid.addWidget(self.input, 1, 0)
         grid.addWidget(self.btnConnect, 1, 1)
+        grid.addWidget(self.btnAlter, 1, 2)
         grid.addWidget(self.txtStreamer, 2, 0, 6, 2)
  
         self.setLayout(grid)
