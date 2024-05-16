@@ -74,9 +74,9 @@ class BleConnector:
                             if 'notify' in char.properties:
                                 #https://stackoverflow.com/questions/65120622/use-python-and-bleak-library-to-notify-a-bluetooth-gatt-device-but-the-result-i
                                 #logger.info('  [Characteristic] %s (%s)', char, ','.join(char.properties))
-                                await client.start_notify(char.uuid, self.notify)
+                                await c.start_notify(char.uuid, self.notify)
                                 await asyncio.sleep(1)
-                                await client.stop_notify(char.uuid)                  
+                                await c.stop_notify(char.uuid)                  
 
     async def stop(self):
         print('stop')
